@@ -365,7 +365,8 @@ const FAMILIES = [
     variants: [
       { id: 'base', authority: 'db-create',
         consumers: ['db-cfe-admin', 'db-dump-cf', 'db-dump-dt', 'db-dump-xml', 'db-load-cf', 'db-load-dt',
-          'db-load-git', 'db-load-xml', 'db-repo', 'db-run', 'db-update', 'epf-build', 'epf-dump'] },
+          'db-load-git', 'db-load-xml', 'db-repo', 'db-run', 'db-update', 'epf-build', 'epf-dump',
+          'db-eventlog', 'db-session'] },
     ],
   },
   {
@@ -384,7 +385,8 @@ const FAMILIES = [
       // db-run запускает Предприятие и не ждёт процесс — общей обвязки запуска не использует.
       { id: 'base', authority: 'db-create',
         consumers: ['db-dump-cf', 'db-dump-dt', 'db-dump-xml', 'db-load-cf', 'db-load-dt', 'db-load-git',
-          'db-load-xml', 'db-repo', 'db-update', 'epf-build', 'epf-dump', 'db-cfe-admin'] },
+          'db-load-xml', 'db-repo', 'db-update', 'epf-build', 'epf-dump', 'db-cfe-admin'],
+        consumersPs1: ['db-eventlog', 'db-session'] },
     ],
   },
   {
@@ -392,7 +394,8 @@ const FAMILIES = [
     variants: [
       { id: 'base', authority: 'db-create',
         consumers: ['db-dump-cf', 'db-dump-dt', 'db-dump-xml', 'db-load-cf', 'db-load-dt', 'db-load-git',
-          'db-load-xml', 'db-repo', 'db-update', 'epf-build', 'epf-dump', 'db-cfe-admin'] },
+          'db-load-xml', 'db-repo', 'db-update', 'epf-build', 'epf-dump', 'db-cfe-admin',
+          'db-eventlog', 'db-session'] },
     ],
   },
   {
@@ -400,7 +403,8 @@ const FAMILIES = [
     variants: [
       { id: 'base', authority: 'db-dump-cf',
         consumers: ['db-dump-dt', 'db-dump-xml', 'db-load-cf', 'db-load-dt', 'db-load-git',
-          'db-load-xml', 'db-repo', 'db-run', 'db-update', 'epf-build', 'epf-dump', 'db-cfe-admin'] },
+          'db-load-xml', 'db-repo', 'db-run', 'db-update', 'epf-build', 'epf-dump', 'db-cfe-admin'],
+        consumersPy: ['db-eventlog', 'db-session'] },
     ],
   },
   {
@@ -543,7 +547,7 @@ const FAMILIES = [
           'skd-info', 'skd-validate', 'subsystem-compile', 'subsystem-edit', 'subsystem-info',
           'subsystem-validate', 'support-edit', 'template-add', 'template-remove', 'web-info',
           'web-publish', 'web-stop', 'web-unpublish', 'xdto-compile', 'xdto-decompile', 'xdto-edit',
-          'xdto-info', 'xdto-validate', 'v8-xsd-fetch'] },
+          'xdto-info', 'xdto-validate', 'v8-xsd-fetch', 'db-eventlog', 'db-session'] },
     ],
   },
 

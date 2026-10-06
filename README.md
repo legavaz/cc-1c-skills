@@ -241,11 +241,14 @@ python scripts/switch.py --runtime powershell  # вернуть на PowerShell
 ├── db-load-git/         # Загрузка изменений из Git
 ├── db-repo/             # Хранилище конфигурации
 ├── db-cfe-admin/        # Расширения в базе: состав, проверки, свойства, удаление
-├── web-publish/         # Публикация базы через Apache
+├── db-eventlog/         # Выгрузка журнала регистрации (ibcmd)
+├── db-session/          # Сеансы и блокировки сервера (ibcmd)
+├── web-publish/          # Публикация базы через Apache
 ├── web-info/            # Статус Apache и публикаций
 ├── web-stop/            # Остановка Apache
 ├── web-unpublish/       # Удаление публикации
 ├── web-test/            # Тестирование через веб-клиент 1С
+├── query-optimization/  # Составление корректных и оптимизированных запросов
 ├── img-grid/            # Сетка для анализа изображений
 └── v8-xsd-fetch/        # Загрузка XSD-схем платформы (.v8-xsd)
 scripts/
