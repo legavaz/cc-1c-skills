@@ -38,6 +38,18 @@ param(
     [Parameter(Mandatory=$false)]
     [string]$DataDir,
 
+    # Имя базы из .v8-project.json (id / alias / name): путь к журналу определяется автоматически.
+    [Parameter(Mandatory=$false)]
+    [string]$InfoBase,
+
+    # Путь к .v8-project.json (по умолчанию ищется вверх от текущего каталога).
+    [Parameter(Mandatory=$false)]
+    [string]$ProjectFile,
+
+    # Каталог srvinfo кластера (по умолчанию C:\Program Files\1cv8\srvinfo).
+    [Parameter(Mandatory=$false)]
+    [string]$Srvinfo,
+
     [Parameter(Mandatory=$false)]
     [ValidateSet("xml", "json")]
     [string]$Format = "",
@@ -198,6 +210,83 @@ foreach ($tok in $AdditionalIbcmdArguments) {
 # --- Разрешение пути ibcmd ---
 $ibcmdExe = Resolve-IbcmdPath $V8Path
 
+function Find-ProjectFile {
+    # .v8-project.json ищем вверх от текущего каталога, если путь не задан явно.
+    param([string]$Explicit)
+    if ($Explicit) {
+        if (Test-Path -LiteralPath $Explicit -PathType Leaf) { return (Resolve-Path -LiteralPath $Explicit).Path }
+        Write-Host "Error: project file not found: $Explicit" -ForegroundColor Red
+        exit 1
+    }
+    $dir = (Get-Location).Path
+    while ($dir) {
+        $p = Join-Path $dir '.v8-project.json'
+        if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
+        $parent = Split-Path $dir -Parent
+        if (-not $parent -or $parent -eq $dir) { break }
+        $dir = $parent
+    }
+    return $null
+}
+
+function Resolve-BaseLogPath {
+    # Для серверной базы локального кластера журнал лежит на диске:
+    # <srvinfo>\reg_<порт>\<UUID базы>\1Cv8Log. UUID базы берём из реестра кластера 1CV8Clst.lst.
+    param([string]$BaseName, [string]$ProjectFile, [string]$SrvinfoDir)
+    $pf = Find-ProjectFile $ProjectFile
+    if (-not $pf) {
+        Write-Host "Error: .v8-project.json not found (pass -ProjectFile)" -ForegroundColor Red
+        exit 1
+    }
+    $json = Get-Content -LiteralPath $pf -Raw -Encoding UTF8 | ConvertFrom-Json
+    $target = $BaseName.Trim().ToLower()
+    $db = $null
+    foreach ($d in $json.databases) {
+        $names = @()
+        foreach ($k in @('id', 'name', 'ref')) { if ($d.$k) { $names += [string]$d.$k } }
+        if ($d.aliases) { foreach ($a in $d.aliases) { $names += [string]$a } }
+        foreach ($n in $names) { if ($n.Trim().ToLower() -eq $target) { $db = $d; break } }
+        if ($db) { break }
+    }
+    if (-not $db) {
+        Write-Host "Error: base '$BaseName' not found in $pf" -ForegroundColor Red
+        exit 1
+    }
+    if (([string]$db.type).ToLower() -ne 'server') {
+        Write-Host "Error: base '$BaseName' is not a cluster server base (type=$($db.type)); auto-resolution supports server bases only" -ForegroundColor Red
+        exit 1
+    }
+    $ref = if ($db.ref) { [string]$db.ref } else { [string]$db.name }
+    if (-not $SrvinfoDir) { $SrvinfoDir = 'C:\Program Files\1cv8\srvinfo' }
+    if (-not (Test-Path -LiteralPath $SrvinfoDir -PathType Container)) {
+        Write-Host "Error: srvinfo not found: $SrvinfoDir (pass -Srvinfo)" -ForegroundColor Red
+        exit 1
+    }
+    $lsts = @(Get-ChildItem -LiteralPath $SrvinfoDir -Directory -Filter 'reg_*' -ErrorAction SilentlyContinue |
+              ForEach-Object { Join-Path $_.FullName '1CV8Clst.lst' } | Where-Object { Test-Path -LiteralPath $_ })
+    if (-not $lsts) {
+        Write-Host "Error: 1CV8Clst.lst not found under $SrvinfoDir\reg_*" -ForegroundColor Red
+        exit 1
+    }
+    $rx = '\{([0-9a-fA-F\-]{36}),"([^"]*)","[^"]*","[^"]*","[^"]*","([^"]*)"'
+    foreach ($lst in $lsts) {
+        $text = Get-Content -LiteralPath $lst -Raw -Encoding UTF8
+        foreach ($m in [regex]::Matches($text, $rx)) {
+            $uuid = $m.Groups[1].Value
+            $name = $m.Groups[2].Value
+            $r    = $m.Groups[3].Value
+            if ($name -eq $ref -or $r -eq $ref) {
+                $logDir = Join-Path (Join-Path (Split-Path $lst -Parent) $uuid) '1Cv8Log'
+                if (Test-Path -LiteralPath $logDir -PathType Container) { return $logDir }
+                Write-Host "Error: journal directory not found for '$ref': $logDir (журнал базы может храниться в СУБД)" -ForegroundColor Red
+                exit 1
+            }
+        }
+    }
+    Write-Host "Error: base '$ref' not found in cluster registry ($($lsts -join '; '))" -ForegroundColor Red
+    exit 1
+}
+
 # --- Каталог журнала ---
 # eventlog export читает каталог журнала, а не базу; -DataDir — короткий путь к log-data.
 $logDir = $LogPath
@@ -205,8 +294,12 @@ if (-not $logDir -and $DataDir) {
     $logDir = Join-Path $DataDir 'log-data'
     Write-Host "[note] log directory taken from -DataDir: $logDir" -ForegroundColor Yellow
 }
+if (-not $logDir -and $InfoBase) {
+    $logDir = Resolve-BaseLogPath -BaseName $InfoBase -ProjectFile $ProjectFile -SrvinfoDir $Srvinfo
+    Write-Host "[note] log directory resolved from base '$InfoBase': $logDir" -ForegroundColor Yellow
+}
 if (-not $logDir) {
-    Write-Host "Error: specify -LogPath <journal directory> or -DataDir <server data directory>" -ForegroundColor Red
+    Write-Host "Error: specify -LogPath <journal directory>, -DataDir <server data directory> or -InfoBase <base from .v8-project.json>" -ForegroundColor Red
     exit 1
 }
 if (-not (Test-Path -LiteralPath $logDir -PathType Container)) {

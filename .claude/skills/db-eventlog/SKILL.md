@@ -1,6 +1,6 @@
 ---
 name: db-eventlog
-description: Выгрузка журнала регистрации утилитой ibcmd (xml/json + XSD модели событий). Используй когда нужно выгрузить журнал регистрации с файловой базы или автономного сервера без открытия сеанса 1С, разобрать события офлайн или снять XSD-схему модели событий
+description: Выгрузка журнала регистрации утилитой ibcmd (xml/json + XSD модели событий) — с файловой базы, автономного сервера или серверной базы локального кластера (журнал на диске: <srvinfo>\reg_<порт>\<UUID базы>\1Cv8Log), без открытия сеанса 1С. Используй когда нужно выгрузить журнал регистрации, разобрать события офлайн или снять XSD-схему модели событий
 argument-hint: "[logPath] [-From <дата>] [-To <дата>] [-Out <файл>]"
 allowed-tools:
   - Bash
@@ -21,24 +21,32 @@ allowed-tools:
 Поэтому `-LogPath` (или `-DataDir`) обязателен, а реквизиты базы (`-InfoBasePath`, `-UserName`,
 `-Password`) навыку не нужны.
 
-> ⚠️ **Ограничение по базам проекта.** Журнал кластерных серверных баз (`localhost\GitConv`,
-> `localhost\task`) лежит в СУБД, а не в каталоге на диске, и `ibcmd eventlog export` его не видит.
-> Для них работает MCP-1С (`get_event_log`) в живом сеансе. Этот навык — для файловых баз и
-> автономных серверов, в том числе в CI.
+> 📍 **Где лежит журнал кластерной базы.** У серверной базы на локальном кластере журнал
+> (файловый) — в каталоге данных кластера: `<srvinfo>\reg_<порт>\<UUID базы>\1Cv8Log`
+> (напр. `C:\Program Files\1cv8\srvinfo\reg_1541\871ac3cf-f483-400b-9f72-dfdfb05144b9\1Cv8Log`
+> для `localhost\GitConv`). UUID базы берётся из реестра кластера `1CV8Clst.lst` (лежит в том же
+> `reg_<порт>`) по имени/Ref базы — это тот же файл, что даёт идентификаторы всех баз.
+> Проверено: `ibcmd eventlog export` по этому каталогу для `localhost\GitConv` работает (см. пример ниже).
+> Если журнал базы настроен «в базе данных» (СУБД), каталога на диске не будет — тогда пакетная
+> выгрузка невозможна, только MCP-1С `get_event_log` в живом сеансе.
 
 ## Usage
 
 ```
 /db-eventlog <logPath> [-From <дата>] [-To <дата>] [-Out <файл>]
+/db-eventlog -InfoBase <база> [-From <дата>] [-To <дата>] [-Out <файл>]
 /db-eventlog <logPath> -Format json -SkipRoot -Out "C:\WS\events.json"
 /db-eventlog model -Out "C:\WS\events.xsd" <logPath>
 ```
 
 ## Параметры подключения
 
-1. Если пользователь указал путь к журналу или каталогу данных — используй напрямую
-2. Если указал только имя базы — ищи по id / alias / name в `.v8-project.json`; платформа — `v8path` записи
-3. Если не указал — спроси: путь к журналу узнать нельзя, каталог данных навык не угадывает
+1. Если пользователь указал путь к журналу или каталогу данных — используй напрямую (`-LogPath` / `-DataDir`)
+2. Если указал базу (по id / alias / name) — передай её скрипту через `-InfoBase`: путь к журналу он
+   определит сам. Для серверной базы локального кластера — по реестру `1CV8Clst.lst` (см. примечание
+   выше); каталога на диске нет — журнал базы хранится в СУБД, тогда остаётся только MCP-1С `get_event_log`.
+   Платформу (`-V8Path`) бери из `v8path` записи базы в `.v8-project.json`
+3. Если не указал ни путь, ни имя базы — спроси: путь к журналу навык не угадывает
 4. Путь к `ibcmd` — из `-V8Path`; если не передан, навык ищет `ibcmd.exe` рядом с `1cv8`
    (в `C:\Program Files\1cv8\<версия>\bin`, затем в `C:\Program Files\1cv8\ibcmd.exe`);
    на *nix — `/opt/1cv8/<версия>/bin/ibcmd`. Если файла нет — сообщи и предложи установку
@@ -57,6 +65,9 @@ powershell.exe -NoProfile -File "${CLAUDE_SKILL_DIR}/scripts/db-eventlog.ps1" <�
 | `-V8Path <путь>` | нет | Путь к `ibcmd.exe`, каталог `bin` платформы или каталог `1cv8` — ищет `ibcmd` рядом |
 | `-LogPath <путь>` | * | Каталог журнала регистрации (позиционный параметр `ibcmd eventlog export`) |
 | `-DataDir <путь>` | * | Каталог данных сервера: журнал берётся из `<DataDir>\log-data` |
+| `-InfoBase <база>` | * | Имя базы из `.v8-project.json` (id / alias / name): путь к журналу определяется автоматически |
+| `-ProjectFile <файл>` | нет | Путь к `.v8-project.json` (по умолчанию ищется вверх от текущего каталога) |
+| `-Srvinfo <путь>` | нет | Каталог `srvinfo` кластера (по умолчанию `C:\Program Files\1cv8\srvinfo`) |
 | `-Format <формат>` | нет | `xml` (по умолчанию у ibcmd) / `json` |
 | `-From <дата>` | нет | Начало периода: `ГГГГ-ММ-ДД` или `ГГГГ-ММ-ДДЧч:мм:сс[.мммммм]`; «просто дата» = начало суток |
 | `-To <дата>` | нет | Конец периода в том же формате; «просто дата» = конец суток |
@@ -65,7 +76,7 @@ powershell.exe -NoProfile -File "${CLAUDE_SKILL_DIR}/scripts/db-eventlog.ps1" <�
 | `-Follow <мс>` | нет | Ожидание новых событий с частотой `<мс>` (для наблюдения в реальном времени) |
 | `-AdditionalIbcmdArguments <список>` | нет | Доп. аргументы `ibcmd` через запятую, в форме `--ключ=значение` |
 
-> `*` — нужен либо `-LogPath`, либо `-DataDir`
+> `*` — нужен один из: `-LogPath`, `-DataDir` или `-InfoBase`
 
 ### Коды возврата
 
@@ -88,6 +99,12 @@ powershell.exe -NoProfile -File "${CLAUDE_SKILL_DIR}/scripts/db-eventlog.ps1" -L
 # Каталог данных вместо пути к журналу
 powershell.exe -NoProfile -File "${CLAUDE_SKILL_DIR}/scripts/db-eventlog.ps1" -DataDir "E:\srv\standalone-server" -Out "E:\WS\events.xml"
 
+# Журнал кластерной базы GitConv (файловый): путь по UUID из 1CV8Clst.lst
+powershell.exe -NoProfile -File "${CLAUDE_SKILL_DIR}/scripts/db-eventlog.ps1" -V8Path "C:\Program Files\1cv8\8.3.27.2214\bin" -LogPath "C:\Program Files\1cv8\srvinfo\reg_1541\871ac3cf-f483-400b-9f72-dfdfb05144b9\1Cv8Log" -From 2026-10-13 -To 2026-10-14 -Out "C:\WS\gitconv_events.xml"
+
+# Тот же журнал, но путь не задаём — скрипт найдёт его по имени базы из .v8-project.json
+powershell.exe -NoProfile -File "${CLAUDE_SKILL_DIR}/scripts/db-eventlog.ps1" -V8Path "C:\Program Files\1cv8\8.3.27.2214\bin" -InfoBase gitconv -From 2026-10-13 -To 2026-10-14 -Out "C:\WS\gitconv_events.xml"
+
 # XSD-схема модели событий (нужна для разбора выгрузки внешними средствами)
 powershell.exe -NoProfile -File "${CLAUDE_SKILL_DIR}/scripts/db-eventlog.ps1" -Command model -LogPath "E:\srv\standalone-server\log-data" -Out "E:\WS\events.xsd"
 ```
@@ -104,7 +121,7 @@ powershell.exe -NoProfile -File "${CLAUDE_SKILL_DIR}/scripts/db-eventlog.ps1" -C
 
 | Задача | Навык |
 |--------|-------|
-| Журнал регистрации кластерной базы (в сеансе) | MCP-1С `get_event_log` |
+| Журнал регистрации кластерной базы | пакетно — этот навык (`-LogPath` по UUID из `1CV8Clst.lst`); в живом сеансе — MCP-1С `get_event_log` |
 | Обслуживание расширений в базе | `/db-cfe-admin` |
 | Конвертация (журнал — главный источник ошибок конвейера) | [`docs/КОНТЕКСТ_СЕССИИ.md`](../../../docs/КОНТЕКСТ_СЕССИИ.md) §7 |
 | Возможности ibcmd целиком | [`docs/ibcmd/`](../../../docs/ibcmd/README.md) |

@@ -3,6 +3,7 @@
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -235,6 +236,81 @@ def normalize_date(value, param_name, default_time):
     sys.exit(1)
 
 
+def find_project_file(explicit):
+    """Путь к .v8-project.json: явный -ProjectFile либо поиск вверх от текущего каталога."""
+    if explicit:
+        if os.path.isfile(explicit):
+            return os.path.abspath(explicit)
+        print("Error: project file not found: %s" % explicit)
+        sys.exit(1)
+    d = os.getcwd()
+    while True:
+        p = os.path.join(d, ".v8-project.json")
+        if os.path.isfile(p):
+            return p
+        parent = os.path.dirname(d)
+        if not parent or parent == d:
+            return None
+        d = parent
+
+
+def resolve_base_log_path(base_name, project_file, srvinfo_dir):
+    """Для серверной базы локального кластера журнал лежит на диске:
+    <srvinfo>\\reg_<порт>\\<UUID базы>\\1Cv8Log. UUID берём из реестра кластера 1CV8Clst.lst."""
+    pf = find_project_file(project_file)
+    if not pf:
+        print("Error: .v8-project.json not found (pass -ProjectFile)")
+        sys.exit(1)
+    with open(pf, encoding="utf-8-sig") as f:
+        data = json.load(f)
+    target = base_name.strip().lower()
+    db = None
+    for d in data.get("databases", []):
+        names = [str(d[k]) for k in ("id", "name", "ref") if d.get(k)]
+        for a in d.get("aliases") or []:
+            names.append(str(a))
+        if any(n.strip().lower() == target for n in names):
+            db = d
+            break
+    if db is None:
+        print("Error: base '%s' not found in %s" % (base_name, pf))
+        sys.exit(1)
+    if str(db.get("type", "")).lower() != "server":
+        print("Error: base '%s' is not a cluster server base (type=%s); "
+              "auto-resolution supports server bases only" % (base_name, db.get("type")))
+        sys.exit(1)
+    ref = str(db.get("ref") or db.get("name") or "")
+    if not srvinfo_dir:
+        srvinfo_dir = r"C:\Program Files\1cv8\srvinfo"
+    if not os.path.isdir(srvinfo_dir):
+        print("Error: srvinfo not found: %s (pass -Srvinfo)" % srvinfo_dir)
+        sys.exit(1)
+    lsts = []
+    for name in sorted(os.listdir(srvinfo_dir)):
+        reg = os.path.join(srvinfo_dir, name)
+        lst = os.path.join(reg, "1CV8Clst.lst")
+        if name.startswith("reg_") and os.path.isdir(reg) and os.path.isfile(lst):
+            lsts.append(lst)
+    if not lsts:
+        print("Error: 1CV8Clst.lst not found under %s\\reg_*" % srvinfo_dir)
+        sys.exit(1)
+    rx = re.compile(r'\{([0-9a-fA-F\-]{36}),"([^"]*)","[^"]*","[^"]*","[^"]*","([^"]*)"')
+    for lst in lsts:
+        with open(lst, encoding="utf-8-sig", errors="replace") as f:
+            text = f.read()
+        for m in rx.finditer(text):
+            uuid, name, r = m.group(1), m.group(2), m.group(3)
+            if name == ref or r == ref:
+                log_dir = os.path.join(os.path.dirname(lst), uuid, "1Cv8Log")
+                if os.path.isdir(log_dir):
+                    return log_dir
+                print("Error: journal directory not found for '%s': %s "
+                      "(журнал базы может храниться в СУБД)" % (ref, log_dir))
+                sys.exit(1)
+    print("Error: base '%s' not found in cluster registry (%s)" % (ref, "; ".join(lsts)))
+    sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Журнал регистрации через ibcmd")
     parser.add_argument("-Command", default="", choices=["", "export", "model"],
@@ -245,6 +321,12 @@ def main():
                         help="Каталог журнала регистрации (позиционный параметр ibcmd)")
     parser.add_argument("-DataDir", default="",
                         help="Каталог данных сервера: журнал берётся из <DataDir>/log-data")
+    parser.add_argument("-InfoBase", default="",
+                        help="Имя базы из .v8-project.json (id/alias/name): путь к журналу определяется автоматически")
+    parser.add_argument("-ProjectFile", default="",
+                        help="Путь к .v8-project.json (по умолчанию ищется вверх от текущего каталога)")
+    parser.add_argument("-Srvinfo", default="",
+                        help="Каталог srvinfo кластера (по умолчанию C:\\Program Files\\1cv8\\srvinfo)")
     parser.add_argument("-Format", default="", choices=["", "xml", "json"],
                         help="Формат выгрузки (по умолчанию у ibcmd — xml)")
     parser.add_argument("-From", default="", help="Начало периода")
@@ -287,8 +369,12 @@ def main():
     if not log_dir and args.DataDir:
         log_dir = os.path.join(args.DataDir, "log-data")
         print("[note] log directory taken from -DataDir: %s" % log_dir)
+    if not log_dir and args.InfoBase:
+        log_dir = resolve_base_log_path(args.InfoBase, args.ProjectFile, args.Srvinfo)
+        print("[note] log directory resolved from base '%s': %s" % (args.InfoBase, log_dir))
     if not log_dir:
-        print("Error: specify -LogPath <journal directory> or -DataDir <server data directory>")
+        print("Error: specify -LogPath <journal directory>, -DataDir <server data directory> "
+              "or -InfoBase <base from .v8-project.json>")
         sys.exit(1)
     if not os.path.isdir(log_dir):
         print("Error: journal directory not found: %s" % log_dir)
